@@ -1,0 +1,41 @@
+# Example configuration file
+
+# Connectors
+connectors:
+  local_filesystem_raw: 
+    type: filesystem
+    base_path: raw
+  local_filesystem_ingested: 
+    type: filesystem
+    base_path: ingested
+
+# Data source metadata
+data_sources:
+  - domain: example
+    name: customers
+    source: 
+      connector: local_filesystem_raw
+      fqn_resource: customers.csv
+      is_cdc: false
+      primary_key: [id]
+      timestamp_field: updated_at
+    destination:
+      connector: local_filesystem_ingested
+      ordering: [id asc]
+    schedule:
+      cron: "* * * * *"  # Run hourly
+      random_offset: true
+    validate:
+      not_null: [id, name]
+      unique: [id]
+    fields:
+      - label: id
+        data_type: string
+      - label: name
+        data_type: string
+      - label: age
+        data_type: int
+      - label: email
+        data_type: string
+      - label: updated_at
+        data_type: timestamp
