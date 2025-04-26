@@ -1,372 +1,392 @@
 package filesystem
 
 import (
-	"bufio"
-	"encoding/csv"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/mitchellh/mapstructure"
-	"github.com/xitongsys/parquet-go-source/local"
-	"github.com/xitongsys/parquet-go/parquet"
-	"github.com/xitongsys/parquet-go/reader"
-	"github.com/xitongsys/parquet-go/schema"
-	"github.com/xitongsys/parquet-go/writer"
+	"github.com/andrew-a-hale/mdf/internal/parser"
+	"github.com/google/uuid"
+	_ "github.com/marcboeker/go-duckdb" // Import for side effect of registering driver
 )
 
-// FilesystemConnector represents a filesystem connector
+// FilesystemConnector represents a filesystem connector using DuckDB as the engine
 type FilesystemConnector struct {
-	BasePath string
+	BasePath       string
+	Partition      string
+	db             *sql.DB
+	ProcessedFiles map[string]bool
+	Fields         []parser.FieldConfig
 }
 
 // New creates a new filesystem connector
-func New(basePath string) (*FilesystemConnector, error) {
+func New(basePath string, partition string, fields []parser.FieldConfig) (*FilesystemConnector, error) {
 	// Ensure the base path exists
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
 		slog.Error("Base path does not exist", "path", basePath)
 		return nil, fmt.Errorf("base path does not exist: %s", basePath)
 	}
 
-	slog.Info("Initialized filesystem connector", "basePath", basePath)
-	return &FilesystemConnector{BasePath: basePath}, nil
-}
+	// Validate that partition is provided and not empty
+	if partition == "" {
+		slog.Error("Partition is required", "partition", partition)
+		return nil, fmt.Errorf("partition is required")
+	}
 
-// Read reads data from a file
-func (fc *FilesystemConnector) Read(resource string) ([]map[string]any, error) {
-	filePath := filepath.Join(fc.BasePath, resource)
-	ext := filepath.Ext(filePath)
-
-	slog.Info("Reading from file", "path", filePath, "format", ext)
-
-	switch strings.ToLower(ext) {
-	case ".csv":
-		return fc.readCSV(filePath)
-	case ".json":
-		return fc.readJSON(filePath)
-	case ".jsonl":
-		return fc.readJSONL(filePath)
-	case ".parquet":
-		return fc.readParquet(filePath)
+	// Validate partition type
+	switch partition {
+	case "daily", "hourly", "monthly":
+		// Valid partition types
 	default:
-		slog.Error("Unsupported file format", "format", ext, "file", filePath)
-		return nil, fmt.Errorf("unsupported file format: %s", ext)
+		slog.Error("Invalid partition type", "partition", partition)
+		return nil, fmt.Errorf("invalid partition type: %s, must be one of: daily, hourly, monthly", partition)
 	}
+
+	// Initialize DuckDB in-memory database
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		slog.Error("Failed to initialize DuckDB", "error", err)
+		return nil, fmt.Errorf("failed to initialize DuckDB: %w", err)
+	}
+
+	slog.Info("Initialized filesystem connector", "basePath", basePath, "partition", partition)
+	return &FilesystemConnector{
+		BasePath:       basePath,
+		Partition:      partition,
+		db:             db,
+		ProcessedFiles: make(map[string]bool),
+		Fields:         fields,
+	}, nil
 }
 
-// Write writes data to a file
-func (fc *FilesystemConnector) Write(resource string, data []map[string]any) error {
-	filePath := filepath.Join(fc.BasePath, resource)
-	ext := filepath.Ext(filePath)
-
-	slog.Info("Writing to file", "path", filePath, "format", ext, "records", len(data))
-
-	// Ensure the directory exists
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		slog.Error("Failed to create directory", "dir", dir, "error", err)
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	switch strings.ToLower(ext) {
-	case ".csv":
-		return fc.writeCSV(filePath, data)
-	case ".json":
-		return fc.writeJSON(filePath, data)
-	case ".jsonl":
-		return fc.writeJSONL(filePath, data)
-	case ".parquet":
-		return fc.writeParquet(filePath, data)
-	default:
-		slog.Error("Unsupported file format", "format", ext, "file", filePath)
-		return fmt.Errorf("unsupported file format: %s", ext)
-	}
+// GetPartition returns the partition type
+func (fc *FilesystemConnector) GetPartition() string {
+	return fc.Partition
 }
 
-// readCSV reads a CSV file and returns the data as a slice of maps
-func (fc *FilesystemConnector) readCSV(filePath string) ([]map[string]any, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+// Close closes the database connection
+func (fc *FilesystemConnector) Close() error {
+	if fc.db != nil {
+		return fc.db.Close()
 	}
-	defer file.Close()
+	return nil
+}
 
-	reader := csv.NewReader(file)
-
-	// Read header row
-	header, err := reader.Read()
+// Read reads data from a file or directory using DuckDB
+func (fc *FilesystemConnector) Read() ([]map[string]any, error) {
+	fileInfo, err := os.Stat(fc.BasePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read header: %w", err)
+		slog.Error("Resource not found", "resource", fc.BasePath)
+		return nil, fmt.Errorf("resource not found: %s", fc.BasePath)
 	}
 
-	var result []map[string]any
+	// If it's a directory, process it as a directory resource
+	if fileInfo.IsDir() {
+		return fc.readFromDirectory()
+	}
 
-	// Read data rows
-	for {
-		row, err := reader.Read()
+	// It's a single file, process it directly
+	ext := filepath.Ext(fc.BasePath)
+	slog.Info("Reading from file", "path", fc.BasePath, "format", ext)
+
+	return fc.readFile(fc.BasePath)
+}
+
+// readFromDirectory reads all files from a directory and combines the results using DuckDB
+func (fc *FilesystemConnector) readFromDirectory() ([]map[string]any, error) {
+	var allFiles []string
+	err := filepath.Walk(fc.BasePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			break // End of file or error
+			return err
 		}
-
-		// Create a map for this row
-		rowMap := make(map[string]any)
-		for i, field := range row {
-			if i < len(header) {
-				rowMap[header[i]] = field
+		if !info.IsDir() {
+			// TODO: Check if the file has already been processed
+			ext := filepath.Ext(path)
+			if isSupportedFileType(ext) {
+				allFiles = append(allFiles, path)
 			}
 		}
-
-		result = append(result, rowMap)
-	}
-
-	return result, nil
-}
-
-// writeCSV writes data to a CSV file
-func (fc *FilesystemConnector) writeCSV(filePath string, data []map[string]any) error {
-	if len(data) == 0 {
-		// Create an empty file
-		return os.WriteFile(filePath, []byte{}, 0644)
-	}
-
-	file, err := os.Create(filePath)
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Extract headers from the first row
-	headers := make([]string, 0, len(data[0]))
-	for key := range data[0] {
-		headers = append(headers, key)
+		slog.Error("Failed to walk directory", "dir", fc.BasePath, "error", err)
+		return nil, fmt.Errorf("failed to walk directory: %w", err)
 	}
 
-	// Write header row
-	if err := writer.Write(headers); err != nil {
-		return fmt.Errorf("failed to write headers: %w", err)
-	}
-
-	// Write data rows
-	for _, row := range data {
-		record := make([]string, len(headers))
-		for i, header := range headers {
-			val, exists := row[header]
-			if exists {
-				record[i] = fmt.Sprintf("%v", val)
-			}
-		}
-
-		if err := writer.Write(record); err != nil {
-			return fmt.Errorf("failed to write record: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// readJSON reads a JSON file and returns the data as a slice of maps
-func (fc *FilesystemConnector) readJSON(filePath string) ([]map[string]any, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	var data []map[string]any
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&data); err != nil {
-		return nil, fmt.Errorf("failed to decode JSON: %w", err)
-	}
-
-	return data, nil
-}
-
-// writeJSON writes data to a JSON file
-func (fc *FilesystemConnector) writeJSON(filePath string, data []map[string]any) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(data); err != nil {
-		return fmt.Errorf("failed to encode JSON: %w", err)
-	}
-
-	return nil
-}
-
-// readJSONL reads a JSONL file and returns the data as a slice of maps
-func (fc *FilesystemConnector) readJSONL(filePath string) ([]map[string]any, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	var data []map[string]any
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		var record map[string]any
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			return nil, fmt.Errorf("failed to decode JSON at line %d: %w", lineNum, err)
-		}
-		data = append(data, record)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading JSONL file: %w", err)
-	}
-
-	return data, nil
-}
-
-// writeJSONL writes data to a JSONL file
-func (fc *FilesystemConnector) writeJSONL(filePath string, data []map[string]any) error {
-	file, err := os.Create(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	writer := bufio.NewWriter(file)
-	defer writer.Flush()
-
-	for _, record := range data {
-		jsonBytes, err := json.Marshal(record)
-		if err != nil {
-			return fmt.Errorf("failed to encode JSON record: %w", err)
-		}
-
-		if _, err := writer.Write(jsonBytes); err != nil {
-			return fmt.Errorf("failed to write JSON record: %w", err)
-		}
-		if _, err := writer.WriteString("\n"); err != nil {
-			return fmt.Errorf("failed to write newline: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// readParquet reads a Parquet file and returns the data as a slice of maps
-func (fc *FilesystemConnector) readParquet(filePath string) ([]map[string]any, error) {
-	// Use the local file reader from parquet-go
-	fr, err := local.NewLocalFileReader(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open Parquet file: %w", err)
-	}
-	defer fr.Close()
-
-	// Create a parquet reader
-	pr, err := reader.NewParquetReader(fr, nil, 4)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Parquet reader: %w", err)
-	}
-	defer pr.ReadStop()
-
-	// Get number of records in the file
-	rowCount := int(pr.GetNumRows())
-	if rowCount == 0 {
+	if len(allFiles) == 0 {
+		slog.Info("No files to process in directory", "dir", fc.BasePath)
 		return []map[string]any{}, nil
 	}
 
-	// Read all records
-	data, err := pr.ReadByNumber(rowCount)
+	// Use DuckDB to read all files at once
+	result, err := fc.readFiles(allFiles)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Parquet records: %w", err)
+		return nil, err
 	}
 
-	// Convert to []map[string]any
-	var result []map[string]any
-	for _, record := range data {
-		m := make(map[string]any)
-		err = mapstructure.Decode(record, &m)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode Parquet record: %w", err)
+	// Mark files as processed
+	for _, filePath := range allFiles {
+		fc.ProcessedFiles[filePath] = true
+	}
+
+	slog.Info("Read from directory", "dir", fc.BasePath, "files", len(allFiles), "records", len(result))
+	return result, nil
+}
+
+// readFiles reads multiple files using DuckDB
+func (fc *FilesystemConnector) readFiles(filePaths []string) ([]map[string]any, error) {
+	if len(filePaths) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	// Create a temporary view that unifies all files
+	viewName := fmt.Sprintf("temp_view_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+
+	// Group files by extension
+	filesByExt := make(map[string][]string)
+	for _, path := range filePaths {
+		ext := strings.ToLower(filepath.Ext(path))
+		filesByExt[ext] = append(filesByExt[ext], path)
+	}
+
+	// Process each file type and union the results
+	var unionQueries []string
+
+	for ext, files := range filesByExt {
+		var format string
+		switch ext {
+		case ".csv":
+			format = "csv"
+		case ".json":
+			format = "json"
+		case ".jsonl":
+			format = "jsonline"
+		case ".parquet":
+			format = "parquet"
+		default:
+			continue
 		}
-		result = append(result, m)
+
+		// Create temp view for each file type
+		for i, file := range files {
+			subViewName := fmt.Sprintf("%s_%s_%d", viewName, format, i)
+			readQuery := fmt.Sprintf("CREATE TEMPORARY VIEW %s AS SELECT * FROM read_%s_auto('%s')",
+				subViewName, format, file)
+
+			_, err := fc.db.Exec(readQuery)
+			if err != nil {
+				slog.Error("Failed to create temporary view", "query", readQuery, "error", err)
+				return nil, fmt.Errorf("failed to create temporary view: %w", err)
+			}
+
+			unionQueries = append(unionQueries, fmt.Sprintf("SELECT * FROM %s", subViewName))
+		}
+	}
+
+	if len(unionQueries) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	// Create a unified view with all data
+	unifiedQuery := fmt.Sprintf("CREATE TEMPORARY VIEW %s AS %s", viewName, strings.Join(unionQueries, " UNION ALL "))
+	_, err := fc.db.Exec(unifiedQuery)
+	if err != nil {
+		slog.Error("Failed to create unified view", "query", unifiedQuery, "error", err)
+		return nil, fmt.Errorf("failed to create unified view: %w", err)
+	}
+
+	// Query the unified view
+	return fc.queryView(viewName)
+}
+
+// readFile reads a single file using DuckDB
+func (fc *FilesystemConnector) readFile(filePath string) ([]map[string]any, error) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+
+	if !isSupportedFileType(ext) {
+		slog.Error("Unsupported file format", "format", ext, "file", filePath)
+		return nil, fmt.Errorf("unsupported file format: %s", ext)
+	}
+
+	var format string
+	switch ext {
+	case ".csv":
+		format = "csv"
+	case ".json":
+		format = "json"
+	case ".jsonl":
+		format = "jsonline"
+	case ".parquet":
+		format = "parquet"
+	}
+
+	// Create a temporary view for the file
+	viewName := fmt.Sprintf("temp_view_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+	readQuery := fmt.Sprintf("CREATE TEMPORARY VIEW %s AS SELECT * FROM read_%s_auto('%s')",
+		viewName, format, filePath)
+
+	_, err := fc.db.Exec(readQuery)
+	if err != nil {
+		slog.Error("Failed to create temporary view", "query", readQuery, "error", err)
+		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+
+	return fc.queryView(viewName)
+}
+
+// queryView executes a query against a view and returns the results as a slice of maps
+func (fc *FilesystemConnector) queryView(viewName string) ([]map[string]any, error) {
+	// Query the view
+	rows, err := fc.db.Query(fmt.Sprintf("SELECT * FROM %s", viewName))
+	if err != nil {
+		slog.Error("Failed to query view", "view", viewName, "error", err)
+		return nil, fmt.Errorf("failed to query view: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		slog.Error("Failed to get column names", "error", err)
+		return nil, fmt.Errorf("failed to get column names: %w", err)
+	}
+
+	// Prepare for scan
+	values := make([]any, len(columns))
+	valuePtrs := make([]any, len(columns))
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
+
+	// Process rows
+	var result []map[string]any
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			slog.Error("Failed to scan row", "error", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		// Create map for this row
+		entry := make(map[string]any)
+		for i, col := range columns {
+			// Convert DuckDB types to appropriate Go types
+			val := values[i]
+			if val != nil {
+				entry[col] = val
+			} else {
+				entry[col] = nil
+			}
+		}
+		result = append(result, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		slog.Error("Error iterating rows", "error", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	// Drop the temporary view
+	_, err = fc.db.Exec(fmt.Sprintf("DROP VIEW IF EXISTS %s", viewName))
+	if err != nil {
+		slog.Warn("Failed to drop temporary view", "view", viewName, "error", err)
 	}
 
 	return result, nil
 }
 
-// writeParquet writes data to a Parquet file
-func (fc *FilesystemConnector) writeParquet(filePath string, data []map[string]any) error {
+// Write writes data to a partitioned directory using DuckDB
+func (fc *FilesystemConnector) Write(data []map[string]any) error {
 	if len(data) == 0 {
-		// Create an empty file
-		return os.WriteFile(filePath, []byte{}, 0644)
+		slog.Info("No data to write")
+		return nil
 	}
 
-	// Use the local file writer from parquet-go
-	fw, err := local.NewLocalFileWriter(filePath)
+	// Create partition directory name based on current time
+	var partitionName string
+	now := time.Now().UTC()
+
+	switch fc.Partition {
+	case "hourly":
+		partitionName = now.Format("2006-01-02-15")
+	case "daily":
+		partitionName = now.Format("2006-01-02")
+	case "monthly":
+		partitionName = now.Format("2006-01")
+	default:
+		return fmt.Errorf("invalid partition type: %s", fc.Partition)
+	}
+
+	// Generate a unique filename for this write
+	resourceFile := fmt.Sprintf("%s.parquet", uuid.New().String())
+
+	// Create the full path including the partition
+	partitionDir := filepath.Join(fc.BasePath, partitionName)
+	partitionPath := filepath.Join(partitionDir, resourceFile)
+
+	// Ensure the partition directory exists
+	if err := os.MkdirAll(partitionDir, 0755); err != nil {
+		slog.Error("Failed to create partition directory", "dir", partitionDir, "error", err)
+		return fmt.Errorf("failed to create partition directory: %w", err)
+	}
+
+	// Create a temporary table
+	tx, err := fc.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to create Parquet file writer: %w", err)
+		slog.Error("Failed to connect to database", "error", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer fw.Close()
+	defer tx.Commit()
 
-	// Create a simple schema from the first record
-	schemaStr := "message schema {"
-	firstRecord := data[0]
-	for key, val := range firstRecord {
-		var typeName string
-		switch val.(type) {
-		case string:
-			typeName = "UTF8"
-		case int:
-			typeName = "INT32"
-		case int64:
-			typeName = "INT64"
-		case float32, float64:
-			typeName = "DOUBLE"
-		case bool:
-			typeName = "BOOLEAN"
-		default:
-			typeName = "UTF8" // Default to string for unknown types
+	tableName := fmt.Sprintf("temp_table_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+	var cols []string
+	for _, field := range fc.Fields {
+		cols = append(cols, fmt.Sprintf("%s %s", field.Label, field.DataType))
+	}
+	createTableSql := fmt.Sprintf("CREATE TEMPORARY TABLE %s (%s)", tableName, strings.Join(cols, ","))
+	_, err = tx.Exec(createTableSql)
+	if err != nil {
+		slog.Error("Failed to create table", "error", err)
+		return fmt.Errorf("failed to create table: %w", err)
+	}
+
+	// Insert data into table
+	clear(cols)
+	for _, field := range fc.Fields {
+		cols = append(cols, field.Label)
+	}
+	insertSql := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES (%s)",
+		tableName,
+		strings.Join(cols, ","),
+		strings.Repeat("?", len(cols)),
+	)
+
+	for _, row := range data {
+		var fields []any
+		for _, field := range row {
+			fields = append(fields, field)
 		}
-		schemaStr += fmt.Sprintf(" required %s %s;", typeName, key)
+		tx.Exec(insertSql, fields)
 	}
-	schemaStr += "}"
 
-	// Create a parquet writer
-	pw, err := writer.NewParquetWriter(fw, nil, 4)
+	// Write the data to Parquet file using DuckDB's COPY statement
+	copySQL := fmt.Sprintf("COPY (SELECT * FROM %s) TO '%s' (FORMAT PARQUET)", tableName, partitionPath)
+	_, err = tx.Exec(copySQL)
 	if err != nil {
-		return fmt.Errorf("failed to create Parquet writer: %w", err)
-	}
-	pw.RowGroupSize = 128 * 1024 * 1024 // 128MB
-	pw.CompressionType = parquet.CompressionCodec_SNAPPY
-	defer pw.WriteStop()
-
-	// Convert string schema to schema handler
-	schemaHandler, err := schema.NewSchemaHandlerFromJSON(schemaStr)
-	if err != nil {
-		return fmt.Errorf("failed to create schema handler: %w", err)
-	}
-	pw.SchemaHandler = schemaHandler
-
-	// Write data
-	for _, record := range data {
-		if err := pw.Write(record); err != nil {
-			return fmt.Errorf("failed to write Parquet record: %w", err)
-		}
+		slog.Error("Failed to write data to Parquet file", "path", partitionPath, "error", err)
+		return fmt.Errorf("failed to write data to Parquet file: %w", err)
 	}
 
+	slog.Info("Wrote data to partitioned file", "path", partitionPath, "records", len(data), "partition", partitionName)
 	return nil
 }
 
+// isSupportedFileType checks if the file extension is supported
+func isSupportedFileType(ext string) bool {
+	ext = strings.ToLower(ext)
+	return ext == ".csv" || ext == ".json" || ext == ".jsonl" || ext == ".parquet"
+}

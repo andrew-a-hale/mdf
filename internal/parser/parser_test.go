@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,35 +24,37 @@ func TestParseConfigFile(t *testing.T) {
 	// Write test configuration
 	testConfig := `
 connectors:
-  local_filesystem_raw: 
+  source: 
     type: filesystem
     base_path: ../../raw
-  local_filesystem_ingested: 
+    partition: daily
+  destination: 
     type: filesystem
     base_path: ../../ingested
-data_sources:
-  - domain: test
-    name: users
-    source: 
-      connector: local_filesystem_raw
-      fqn_resource: users.csv
-      is_cdc: false
-      primary_key: [id]
-      timestamp_field: updated_at
-    destination:
-      connector: local_filesystem_ingested
-      ordering: [id asc]
-    schedule:
-      cron: "0 0 * * *"
-      random_offset: false
-    validate:
-      not_null: [id, name]
-      unique: [id]
-    fields:
-      - label: id
-        data_type: string
-      - label: name
-        data_type: string
+    partition: daily
+data_source:
+  domain: test
+  name: users
+  source: 
+    connector: source
+    fqn_resource: users.csv
+    is_cdc: false
+    primary_key: [id]
+    timestamp_field: updated_at
+  destination:
+    connector: destination
+    ordering: [id asc]
+  schedule:
+    cron: "0 0 * * *"
+    random_offset: false
+  validate:
+    not_null: [id, name]
+    unique: [id]
+  fields:
+    - label: id
+      data_type: string
+    - label: name
+      data_type: string
 `
 	if _, err := tempFile.Write([]byte(testConfig)); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
@@ -67,26 +70,28 @@ data_sources:
 	}
 
 	// Verify parsed values
-	if len(config.Connectors) != 2 {
-		t.Errorf("Expected 2 connector, got %d", len(config.Connectors))
+	fmt.Println(config)
+	if _, ok := config.Connectors[config.DataSource.Source.Connector]; !ok {
+		t.Errorf("Expected source connector in connectors, %s not found", config.DataSource.Source.Connector)
 	}
 
-	if len(config.DataSources) != 1 {
-		t.Errorf("Expected 1 data source, got %d", len(config.DataSources))
+	// Verify parsed values
+	if _, ok := config.Connectors[config.DataSource.Destination.Connector]; !ok {
+		t.Errorf("Expected destination connector in connectors, %s not found", config.DataSource.Destination.Connector)
 	}
 
-	ds := config.DataSources[0]
+	ds := config.DataSource
 	if ds.Domain != "test" {
 		t.Errorf("Expected domain 'test', got '%s'", ds.Domain)
 	}
 	if ds.Name != "users" {
 		t.Errorf("Expected name 'users', got '%s'", ds.Name)
 	}
-	if ds.Source.Connector != "local_filesystem_raw" {
-		t.Errorf("Expected connector 'local_filesystem_raw', got '%s'", ds.Source.Connector)
+	if ds.Source.Connector != "source" {
+		t.Errorf("Expected connector 'source', got '%s'", ds.Source.Connector)
 	}
-	if ds.Destination.Connector != "local_filesystem_ingested" {
-		t.Errorf("Expected connector 'local_filesystem_ingested', got '%s'", ds.Destination.Connector)
+	if ds.Destination.Connector != "destination" {
+		t.Errorf("Expected connector 'destination', got '%s'", ds.Destination.Connector)
 	}
 	if ds.Schedule.Cron != "0 0 * * *" {
 		t.Errorf("Expected cron '0 0 * * *', got '%s'", ds.Schedule.Cron)
@@ -113,32 +118,37 @@ func TestParseConfigDirectory(t *testing.T) {
 	// Create first config file
 	config1 := `
 connectors:
-  local_filesystem_raw: 
+  source: 
     type: filesystem
     base_path: ../../raw
+    partition: daily
+  destination: 
+    type: filesystem
+    base_path: ../../ingested
+    partition: daily
 data_sources:
-  - domain: test
-    name: users
-    source: 
-      connector: local_filesystem_raw
-      fqn_resource: users.csv
-      is_cdc: false
-      primary_key: [id]
-      timestamp_field: updated_at
-    destination:
-      connector: local_filesystem_raw
-      ordering: [id asc]
-    schedule:
-      cron: "0 0 * * *"
-      random_offset: false
-    validate:
-      not_null: [id, name]
-      unique: [id]
-    fields:
-      - label: id
-        data_type: string
-      - label: name
-        data_type: string
+  domain: test
+  name: users
+  source: 
+    connector: source
+    fqn_resource: users.csv
+    is_cdc: false
+    primary_key: [id]
+    timestamp_field: updated_at
+  destination:
+    connector: destination
+    ordering: [id asc]
+  schedule:
+    cron: "0 0 * * *"
+    random_offset: false
+  validate:
+    not_null: [id, name]
+    unique: [id]
+  fields:
+    - label: id
+      data_type: string
+    - label: name
+      data_type: string
 `
 	config1Path := filepath.Join(tempDir, "config1.yaml")
 	if err := os.WriteFile(config1Path, []byte(config1), 0644); err != nil {
@@ -148,34 +158,39 @@ data_sources:
 	// Create second config file
 	config2 := `
 connectors:
-  local_filesystem_ingested: 
+  source: 
+    type: filesystem
+    base_path: ../../raw
+    partition: daily
+  destination: 
     type: filesystem
     base_path: ../../ingested
+    partition: daily
 data_sources:
-  - domain: test
-    name: products
-    source: 
-      connector: local_filesystem_raw
-      fqn_resource: products.csv
-      is_cdc: false
-      primary_key: [id]
-      timestamp_field: updated_at
-    destination:
-      connector: local_filesystem_ingested
-      ordering: [id asc]
-    schedule:
-      cron: "0 0 * * *"
-      random_offset: false
-    validate:
-      not_null: [id, name]
-      unique: [id]
-    fields:
-      - label: id
-        data_type: string
-      - label: name
-        data_type: string
-      - label: price
-        data_type: float
+  domain: test
+  name: products
+  source: 
+    connector: source
+    fqn_resource: products.csv
+    is_cdc: false
+    primary_key: [id]
+    timestamp_field: updated_at
+  destination:
+    connector: destination
+    ordering: [id asc]
+  schedule:
+    cron: "0 0 * * *"
+    random_offset: false
+  validate:
+    not_null: [id, name]
+    unique: [id]
+  fields:
+    - label: id
+      data_type: string
+    - label: name
+      data_type: string
+    - label: price
+      data_type: float
 `
 	config2Path := filepath.Join(tempDir, "config2.yaml")
 	if err := os.WriteFile(config2Path, []byte(config2), 0644); err != nil {
@@ -183,18 +198,14 @@ data_sources:
 	}
 
 	// Test parsing directory
-	config, err := ParseConfigDirectory(tempDir)
+	configs, err := ParseConfigDirectory(tempDir)
 	if err != nil {
 		t.Fatalf("ParseConfigDirectory() error = %v", err)
 	}
 
 	// Verify combined config
-	if len(config.Connectors) != 2 {
-		t.Errorf("Expected 2 connectors, got %d", len(config.Connectors))
-	}
-
-	if len(config.DataSources) != 2 {
-		t.Errorf("Expected 2 data sources, got %d", len(config.DataSources))
+	if len(*configs) != 2 {
+		t.Errorf("Expected 2 configs, got %d", len(*configs))
 	}
 
 	// Test with non-existent directory

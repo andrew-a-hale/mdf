@@ -1,5 +1,5 @@
 build: test
-	go install main.go ;
+	go install ;
 
 test:
 	go test ./... ;

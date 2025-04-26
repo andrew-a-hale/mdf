@@ -3,7 +3,7 @@ package validator
 import (
 	"testing"
 
-	"github.com/andy/mdf/internal/parser"
+	"github.com/andrew-a-hale/mdf/internal/parser"
 )
 
 func TestNew(t *testing.T) {

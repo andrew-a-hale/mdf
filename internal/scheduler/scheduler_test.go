@@ -4,23 +4,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andy/mdf/internal/parser"
+	"github.com/andrew-a-hale/mdf/internal/parser"
 )
 
 func TestNew(t *testing.T) {
 	// Create a simple config
-	config := &parser.Config{
-		Connectors:  make(map[string]any),
-		DataSources: []parser.DataSource{},
+	config := parser.Config{
+		Connectors: nil,
+		DataSource: parser.DataSource{},
 	}
+	var configs parser.Configs
+	configs = append(configs, config)
 
 	// Test scheduler creation
-	s := New(config)
+	s := New(&configs)
 	if s == nil {
 		t.Fatal("New() returned nil")
 	}
 
-	if s.config != config {
+	if len(*s.configs) != 1 {
 		t.Errorf("Scheduler has wrong config reference")
 	}
 
@@ -47,15 +49,18 @@ func TestStartStop(t *testing.T) {
 	}
 
 	// Create config with the test data source
-	config := &parser.Config{
+	config := parser.Config{
 		Connectors: map[string]any{
 			"test_connector": "test",
 		},
-		DataSources: []parser.DataSource{ds},
+		DataSource: ds,
 	}
 
+	var configs parser.Configs
+	configs = append(configs, config)
+
 	// Create scheduler
-	s := New(config)
+	s := New(&configs)
 
 	// Test Start
 	err := s.Start()
@@ -93,16 +98,15 @@ func TestScheduleDataSourceWithInvalidCron(t *testing.T) {
 		},
 	}
 
-	// Create config with the test data source
-	config := &parser.Config{
-		Connectors: map[string]any{
-			"test_connector": "test",
-		},
-		DataSources: []parser.DataSource{ds},
+	config := parser.Config{
+		Connectors: nil,
+		DataSource: ds,
 	}
+	var configs parser.Configs
+	configs = append(configs, config)
 
 	// Create scheduler
-	s := New(config)
+	s := New(&configs)
 
 	// Test Start with invalid cron
 	err := s.Start()

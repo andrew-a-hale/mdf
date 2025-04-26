@@ -3,24 +3,24 @@ package executor
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
-	"github.com/andy/mdf/internal/connectors"
-	"github.com/andy/mdf/internal/parser"
-	"github.com/andy/mdf/internal/validator"
+	"github.com/andrew-a-hale/mdf/internal/connectors"
+	"github.com/andrew-a-hale/mdf/internal/connectors/filesystem"
+	"github.com/andrew-a-hale/mdf/internal/parser"
+	"github.com/andrew-a-hale/mdf/internal/validator"
 )
 
 // Executor handles the execution of data ingestion jobs
 type Executor struct {
-	dataSource parser.DataSource
-	connectors map[string]connectors.Connector
+	Config parser.Config
 }
 
 // New creates a new executor instance
-func New(dataSource parser.DataSource, connectors map[string]connectors.Connector) *Executor {
+func New(config parser.Config) *Executor {
 	return &Executor{
-		dataSource: dataSource,
-		connectors: connectors,
+		Config: config,
 	}
 }
 
@@ -28,41 +28,61 @@ func New(dataSource parser.DataSource, connectors map[string]connectors.Connecto
 func (e *Executor) Execute() error {
 	// Log the execution start with timestamp
 	start := time.Now()
+	jobID := fmt.Sprintf("%s-%s-%d", e.Config.DataSource.Domain, e.Config.DataSource.Name, start.Unix())
 	slog.Info("Job started",
-		"domain", e.dataSource.Domain,
-		"name", e.dataSource.Name,
+		"domain", e.Config.DataSource.Domain,
+		"name", e.Config.DataSource.Name,
 		"time", start.Format(time.RFC3339),
-		"job_id", fmt.Sprintf("%s-%s-%d", e.dataSource.Domain, e.dataSource.Name, start.Unix()))
+		"job_id", jobID)
 
 	// Get source connector
-	sourceConnector, err := e.getConnector(e.dataSource.Source.Connector)
-	if err != nil {
-		slog.Error("Failed to get source connector",
-			"error", err,
-			"connector", e.dataSource.Source.Connector)
-		return err
+	var err error
+	var sourceConnecter connectors.Connector
+	switch e.Config.Connectors["source"].(map[string]any)["type"] {
+	case connectors.FILESYSTEM:
+		sourceConnecter, err = filesystem.New(
+			filepath.Join("raw", e.Config.DataSource.Domain),
+			e.Config.Connectors["source"].(map[string]any)["partition"].(string),
+			e.Config.DataSource.Fields,
+		)
+		if err != nil {
+			slog.Error("failed to initialise source connector", "error", err)
+			return fmt.Errorf("failed to initialise source connector: %v", err)
+		}
+	default:
+		slog.Error("failed to initialise source connector", "error", err)
+		return fmt.Errorf("failed to initialise source connector: %v", err)
 	}
 
-	// Get destination connector
-	destConnector, err := e.getConnector(e.dataSource.Destination.Connector)
-	if err != nil {
-		slog.Error("Failed to get destination connector",
-			"error", err,
-			"connector", e.dataSource.Destination.Connector)
-		return err
+	// Get source connector
+	var destConnecter connectors.Connector
+	switch e.Config.Connectors["destination"].(map[string]any)["type"] {
+	case connectors.FILESYSTEM:
+		destConnecter, err = filesystem.New(
+			filepath.Join("ingested", e.Config.DataSource.Domain),
+			e.Config.Connectors["destination"].(map[string]any)["partition"].(string),
+			e.Config.DataSource.Fields,
+		)
+		if err != nil {
+			slog.Error("failed to initialise destination connector", "error", err)
+			return fmt.Errorf("failed to initialise destination connector: %v", err)
+		}
+	default:
+		slog.Error("failed to initialise destination connector", "error", err)
+		return fmt.Errorf("failed to initialise destination connector: %v", err)
 	}
 
 	// Extract data from source
-	data, err := e.extractData(sourceConnector)
+	data, err := sourceConnecter.Read()
 	if err != nil {
 		slog.Error("Failed to extract data",
 			"error", err,
-			"source", e.dataSource.Source.FQNResource)
+			"source", e.Config.DataSource.Source.FQNResource)
 		return err
 	}
 
 	// Validate the data
-	validator := validator.New(e.dataSource.Validate)
+	validator := validator.New(e.Config.DataSource.Validate)
 	err = validator.Validate(data)
 	if err != nil {
 		slog.Error("Validation failed", "error", err)
@@ -70,7 +90,7 @@ func (e *Executor) Execute() error {
 	}
 
 	// Load data to destination
-	err = e.loadData(destConnector, data)
+	err = destConnecter.Write(data)
 	if err != nil {
 		slog.Error("Failed to load data", "error", err)
 		return err
@@ -80,38 +100,12 @@ func (e *Executor) Execute() error {
 	end := time.Now()
 	duration := end.Sub(start)
 	slog.Info("Job completed",
-		"domain", e.dataSource.Domain,
-		"name", e.dataSource.Name,
+		"domain", e.Config.DataSource.Domain,
+		"name", e.Config.DataSource.Name,
 		"records", len(data),
 		"time", end.Format(time.RFC3339),
 		"duration_ms", duration.Milliseconds(),
-		"job_id", fmt.Sprintf("%s-%s-%d", e.dataSource.Domain, e.dataSource.Name, start.Unix()))
+		"job_id", jobID)
+
 	return nil
 }
-
-// getConnector retrieves a connector by name
-func (e *Executor) getConnector(name string) (connectors.Connector, error) {
-	connector, ok := e.connectors[name]
-	if !ok {
-		return nil, fmt.Errorf("connector not found: %s", name)
-	}
-	return connector, nil
-}
-
-// extractData extracts data from the source
-func (e *Executor) extractData(connector connectors.Connector) ([]map[string]any, error) {
-	// Read data from the source
-	return connector.Read(e.dataSource.Source.FQNResource)
-}
-
-// loadData loads data to the destination
-func (e *Executor) loadData(connector connectors.Connector, data []map[string]any) error {
-	// Generate destination path (appending timestamp for uniqueness if needed)
-	destResource := fmt.Sprintf("%s_%s.csv",
-		e.dataSource.Name,
-		time.Now().Format("20060102150405"))
-
-	// Write data to the destination
-	return connector.Write(destResource, data)
-}
-

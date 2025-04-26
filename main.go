@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andy/mdf/internal/parser"
-	"github.com/andy/mdf/internal/scheduler"
+	"github.com/andrew-a-hale/mdf/internal/parser"
+	"github.com/andrew-a-hale/mdf/internal/scheduler"
 )
 
 func main() {

@@ -6,16 +6,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/andy/mdf/internal/connectors"
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the global configuration
-type Config struct {
-	Connectors            map[string]any                  `yaml:"connectors"`
-	DataSources           []DataSource                    `yaml:"data_sources"`
-	InitializedConnectors map[string]connectors.Connector `yaml:"-"` // Runtime initialized connectors
-}
+type (
+	Configs []Config
+	Config  struct {
+		Connectors map[string]any `yaml:"connectors"`
+		DataSource DataSource     `yaml:"data_source"`
+	}
+)
 
 // DataSource represents a data source configuration
 type DataSource struct {
@@ -74,30 +75,20 @@ func ParseConfigFile(filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config file: %w", err)
 	}
 
-	// Initialize connectors
-	err = config.InitializeConnectors()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize connectors: %w", err)
-	}
-
 	return config, nil
 }
 
 // ParseConfigDirectory parses all YAML files in a directory into a Config struct
-func ParseConfigDirectory(dirPath string) (*Config, error) {
+func ParseConfigDirectory(dirPath string) (*Configs, error) {
+	var configs Configs
+
+	// Track the number of files processed
+	filesProcessed := 0
+
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config directory: %w", err)
 	}
-
-	// Initialize an empty config
-	combinedConfig := &Config{
-		Connectors:  make(map[string]any),
-		DataSources: []DataSource{},
-	}
-
-	// Track the number of files processed
-	filesProcessed := 0
 
 	// Process each YAML file in the directory
 	for _, entry := range entries {
@@ -120,14 +111,7 @@ func ParseConfigDirectory(dirPath string) (*Config, error) {
 			return nil, fmt.Errorf("failed to parse config file %s: %w", filePath, err)
 		}
 
-		// Merge connectors
-		for key, value := range config.Connectors {
-			combinedConfig.Connectors[key] = value
-		}
-
-		// Append data sources
-		combinedConfig.DataSources = append(combinedConfig.DataSources, config.DataSources...)
-
+		configs = append(configs, *config)
 		filesProcessed++
 	}
 
@@ -135,13 +119,13 @@ func ParseConfigDirectory(dirPath string) (*Config, error) {
 		return nil, fmt.Errorf("no YAML config files found in directory: %s", dirPath)
 	}
 
-	slog.Info("Processed config files", "count", filesProcessed, "connectors", len(combinedConfig.Connectors), "dataSources", len(combinedConfig.DataSources))
+	slog.Info(
+		"Processed config files",
+		"count",
+		filesProcessed,
+		"configs",
+		len(configs),
+	)
 
-	// Initialize connectors
-	err = combinedConfig.InitializeConnectors()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize connectors: %w", err)
-	}
-
-	return combinedConfig, nil
+	return &configs, nil
 }

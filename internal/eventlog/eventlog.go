@@ -42,7 +42,7 @@ func (e *EventLogger) LogEvent(eventType string, message string, attrs map[strin
 func (e *EventLogger) Log(component, message string, attrs ...any) {
 	logAttrs := []any{"component", component, "timestamp", time.Now()}
 	logAttrs = append(logAttrs, attrs...)
-	
+
 	e.logger.Info(message, logAttrs...)
 }
 
@@ -50,7 +50,7 @@ func (e *EventLogger) Log(component, message string, attrs ...any) {
 func (e *EventLogger) LogError(component, message string, err error, attrs ...any) {
 	logAttrs := []any{"component", component, "timestamp", time.Now(), "error", err}
 	logAttrs = append(logAttrs, attrs...)
-	
+
 	e.logger.Error(message, logAttrs...)
 }
 
@@ -83,3 +83,4 @@ func (e *EventLogger) LogJobEnd(domain string, name string, success bool, err er
 
 	e.LogEvent("job_end", message, attrs)
 }
+

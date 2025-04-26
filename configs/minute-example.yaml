@@ -2,36 +2,38 @@
 
 # Connectors
 connectors:
-  local_filesystem_raw: 
+  source: 
     type: filesystem
-    base_path: raw
-  local_filesystem_ingested: 
+    base_path: raw/minute-example
+    partition: hourly
+  destination: 
     type: filesystem
-    base_path: ingested
+    base_path: ingested/minute-example
+    partition: hourly
 
 # Data source metadata
-data_sources:
-  - domain: example
-    name: minute_test
-    source: 
-      connector: local_filesystem_raw
-      fqn_resource: test.csv
-      is_cdc: false
-      primary_key: [id]
-      timestamp_field: created_at
-    destination:
-      connector: local_filesystem_ingested
-      ordering: [id asc]
-    schedule:
-      cron: "* * * * *"  # Run every minute
-      random_offset: false
-    validate:
-      not_null: [id, value]
-      unique: [id]
-    fields:
-      - label: id
-        data_type: string
-      - label: value
-        data_type: string
-      - label: created_at
-        data_type: timestamp
+data_source:
+  domain: minute-example
+  name: minute_test
+  source: 
+    connector: source
+    fqn_resource: test
+    is_cdc: false
+    primary_key: [id]
+    timestamp_field: created_at
+  destination:
+    connector: destination
+    ordering: [id asc]
+  schedule:
+    cron: "* * * * *"  # Run every minute
+    random_offset: false
+  validate:
+    not_null: [id, value]
+    unique: [id]
+  fields:
+    - label: id
+      data_type: string
+    - label: value
+      data_type: string
+    - label: created_at
+      data_type: timestamp

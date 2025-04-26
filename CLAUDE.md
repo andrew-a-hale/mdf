@@ -13,16 +13,16 @@ code in this repository.
 
 ## Code Style Guidelines
 
-- Go version: 1.21+
+- Go version: 1.23+
 - Error handling: Return errors with context using
   `fmt.Errorf("failed to X: %w", err)`
 - Logging: Use structured logging with `log/slog` package
-- Naming: Use CamelCase for exported types/fields, camelCase for private
+- Naming: Use PascalCase for exported types/fields, camelCase for private
 - Comments: Document exported functions with godoc-style comments
 - Imports: Group standard library, then external, then internal packages
 - Prefer composition over inheritance
 - Return early from functions instead of nesting conditionals
 - For key data types, include validation in constructors (use New() functions)
-- Use interfaces for connector implementations
+- Use the Connector interface for connector implementations
 - Unit test each package, following table-driven test patterns
-
+- Use English (Australia) Spelling, eg. Colour not Color, and Initialise not Initialize
