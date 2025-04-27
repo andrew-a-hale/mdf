@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,7 +43,7 @@ data_source:
   destination:
     connector: destination
     ordering: [id asc]
-  schedule:
+  trigger:
     cron: "0 0 * * *"
     random_offset: false
   validate:
@@ -70,7 +69,6 @@ data_source:
 	}
 
 	// Verify parsed values
-	fmt.Println(config)
 	if _, ok := config.Connectors[config.DataSource.Source.Connector]; !ok {
 		t.Errorf("Expected source connector in connectors, %s not found", config.DataSource.Source.Connector)
 	}
@@ -93,8 +91,8 @@ data_source:
 	if ds.Destination.Connector != "destination" {
 		t.Errorf("Expected connector 'destination', got '%s'", ds.Destination.Connector)
 	}
-	if ds.Schedule.Cron != "0 0 * * *" {
-		t.Errorf("Expected cron '0 0 * * *', got '%s'", ds.Schedule.Cron)
+	if ds.Trigger.Cron != "0 0 * * *" {
+		t.Errorf("Expected cron '0 0 * * *', got '%s'", ds.Trigger.Cron)
 	}
 	if len(ds.Fields) != 2 {
 		t.Errorf("Expected 2 fields, got %d", len(ds.Fields))
@@ -138,7 +136,7 @@ data_sources:
   destination:
     connector: destination
     ordering: [id asc]
-  schedule:
+  trigger:
     cron: "0 0 * * *"
     random_offset: false
   validate:
@@ -178,7 +176,7 @@ data_sources:
   destination:
     connector: destination
     ordering: [id asc]
-  schedule:
+  trigger:
     cron: "0 0 * * *"
     random_offset: false
   validate:

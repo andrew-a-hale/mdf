@@ -1,3 +1,4 @@
+// TODO: Rewrite to read events from queue instead of cron
 package scheduler
 
 import (
@@ -55,13 +56,13 @@ func (s *Scheduler) schedule(conf parser.Config) error {
 	slog.Info("Scheduling data source",
 		"domain", conf.DataSource.Domain,
 		"name", conf.DataSource.Name,
-		"cron", conf.DataSource.Schedule.Cron,
-		"random_offset", conf.DataSource.Schedule.RandomOffset)
+		"cron", conf.DataSource.Trigger.Cron,
+		"random_offset", conf.DataSource.Trigger.RandomOffset)
 
 	// Create the job function
 	jobFunc := func() {
 		// Apply random offset if configured
-		if conf.DataSource.Schedule.RandomOffset {
+		if conf.DataSource.Trigger.RandomOffset {
 			offset := time.Duration(rand.Intn(60)) * time.Second
 			slog.Info("Applying random offset",
 				"domain", conf.DataSource.Domain,
@@ -86,9 +87,9 @@ func (s *Scheduler) schedule(conf parser.Config) error {
 	}
 
 	// Add the job to the cron scheduler
-	_, err := s.cron.AddFunc(conf.DataSource.Schedule.Cron, jobFunc)
+	_, err := s.cron.AddFunc(conf.DataSource.Trigger.Cron, jobFunc)
 	if err != nil {
-		return fmt.Errorf("invalid cron expression '%s': %w", conf.DataSource.Schedule.Cron, err)
+		return fmt.Errorf("invalid cron expression '%s': %w", conf.DataSource.Trigger.Cron, err)
 	}
 
 	return nil

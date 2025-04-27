@@ -24,7 +24,7 @@ data_source:
   destination:
     connector: destination
     ordering: [id asc]
-  schedule:
+  trigger:
     cron: "* * * * *"  # Run every minute
     random_offset: false
   validate:

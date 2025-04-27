@@ -21,7 +21,6 @@ func New(config parser.ValidationConfig) *Validator {
 
 // Validate validates a dataset against the validation rules
 func (v *Validator) Validate(data []map[string]any) error {
-	fmt.Println(data)
 	// Validate not null fields
 	err := v.validateNotNull(data)
 	if err != nil {

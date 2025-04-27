@@ -36,7 +36,7 @@ func TestStartStop(t *testing.T) {
 	ds := parser.DataSource{
 		Domain: "test",
 		Name:   "test_source",
-		Schedule: parser.ScheduleConfig{
+		Trigger: parser.TriggerConfig{
 			Cron:         "* * * * *", // Every minute
 			RandomOffset: false,
 		},
@@ -86,7 +86,7 @@ func TestScheduleDataSourceWithInvalidCron(t *testing.T) {
 	ds := parser.DataSource{
 		Domain: "test",
 		Name:   "test_source",
-		Schedule: parser.ScheduleConfig{
+		Trigger: parser.TriggerConfig{
 			Cron:         "invalid cron",
 			RandomOffset: false,
 		},

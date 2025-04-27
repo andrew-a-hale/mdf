@@ -25,7 +25,7 @@ type DataSource struct {
 	Name        string            `yaml:"name"`
 	Source      SourceConfig      `yaml:"source"`
 	Destination DestinationConfig `yaml:"destination"`
-	Schedule    ScheduleConfig    `yaml:"schedule"`
+	Trigger     TriggerConfig     `yaml:"trigger"`
 	Validate    ValidationConfig  `yaml:"validate"`
 	Fields      []FieldConfig     `yaml:"fields"`
 }
@@ -45,9 +45,10 @@ type DestinationConfig struct {
 	Ordering  []string `yaml:"ordering"`
 }
 
-// ScheduleConfig represents the schedule configuration
-type ScheduleConfig struct {
-	Cron         string `yaml:"cron"`
+// TriggerConfig represents the schedule configuration
+type TriggerConfig struct {
+	Cron         string `yaml:"cron,omitempty"`
+	EventId      string `yaml:"event,omitempty"`
 	RandomOffset bool   `yaml:"random_offset"`
 }
 

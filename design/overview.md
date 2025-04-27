@@ -58,7 +58,7 @@ data_source:
   destination:
     connector: destination
     ordering: [id asc]
-  schedule:
+  trigger:
     cron: "* * * * *"  # Run hourly
     random_offset: true
   validate:
