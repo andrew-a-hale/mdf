@@ -91,7 +91,7 @@ graph TB
   notifier[notifier]
 
   config --> parser
-  parser --> scheduler
+  parser --> triggerer
   triggerer --> scheduler
   scheduler --> executor
   executor --> validator
