@@ -83,12 +83,13 @@ data_source:
 graph TB
   event_log[event_log]
   config[config file]
-  parser[parser/storage]
+  parser[parser]
   triggerer[triggerer]
   scheduler[scheduler]
   executor[executor]
   validator[validator]
   notifier[notifier]
+  storage[storage]
 
   config --> parser
   parser --> triggerer
@@ -96,6 +97,10 @@ graph TB
   scheduler --> executor
   executor --> validator
   validator --> notifier
+
+  parser --> storage
+  triggerer --> storage
+  scheduler <--> storage
 
   parser --> event_log
   triggerer --> event_log
