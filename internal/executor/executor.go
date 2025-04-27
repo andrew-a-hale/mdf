@@ -53,8 +53,9 @@ func (e *Executor) Execute() error {
 		slog.Error("failed to initialise source connector", "error", err)
 		return fmt.Errorf("failed to initialise source connector: %v", err)
 	}
+	defer sourceConnecter.Close()
 
-	// Get source connector
+	// Get destination connector
 	var destConnecter connectors.Connector
 	switch e.Config.Connectors["destination"].(map[string]any)["type"] {
 	case connectors.FILESYSTEM:
@@ -71,6 +72,7 @@ func (e *Executor) Execute() error {
 		slog.Error("failed to initialise destination connector", "error", err)
 		return fmt.Errorf("failed to initialise destination connector: %v", err)
 	}
+	defer destConnecter.Close()
 
 	// Extract data from source
 	data, err := sourceConnecter.Read()
@@ -96,6 +98,7 @@ func (e *Executor) Execute() error {
 		return err
 	}
 
+	// TODO: Add eventlog and notifier
 	// Log successful execution with duration
 	end := time.Now()
 	duration := end.Sub(start)

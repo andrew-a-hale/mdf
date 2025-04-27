@@ -36,43 +36,45 @@ becomes worthwhile as more integration is required.
 
 # Connectors
 connectors:
-  local_filesystem_raw: 
+  source: 
     type: filesystem
-    base_path: raw
-  local_filesystem_ingested: 
+    base_path: raw/example
+    partition: daily
+  destination: 
     type: filesystem
-    base_path: ingested
+    base_path: ingested/example
+    partition: daily
 
 # Data source metadata
-data_sources:
-  - domain: example
-    name: customers
-    source: 
-      connector: local_filesystem_raw
-      fqn_resource: customers.csv
-      is_cdc: false
-      primary_key: [id]
-      timestamp_field: updated_at
-    destination:
-      connector: local_filesystem_ingested
-      ordering: [id asc]
-    schedule:
-      cron: "0 * * * *"  # Run hourly
-      random_offset: true
-    validate:
-      not_null: [id, name]
-      unique: [id]
-    fields:
-      - label: id
-        data_type: string
-      - label: name
-        data_type: string
-      - label: age
-        data_type: int
-      - label: email
-        data_type: string
-      - label: updated_at
-        data_type: timestamp
+data_source:
+  domain: example
+  name: customers
+  source: 
+    connector: source
+    fqn_resource: customers
+    is_cdc: false
+    primary_key: [id]
+    timestamp_field: updated_at
+  destination:
+    connector: destination
+    ordering: [id asc]
+  schedule:
+    cron: "* * * * *"  # Run hourly
+    random_offset: true
+  validate:
+    not_null: [id, name]
+    unique: [id]
+  fields:
+    - label: id
+      data_type: string
+    - label: name
+      data_type: string
+    - label: age
+      data_type: int
+    - label: email
+      data_type: string
+    - label: updated_at
+      data_type: timestamp
 ```
 
 ### High Level Architecture
@@ -82,6 +84,7 @@ graph TB
   event_log[event_log]
   config[config file]
   parser[parser/storage]
+  triggerer[triggerer]
   scheduler[scheduler]
   executor[executor]
   validator[validator]
@@ -89,11 +92,13 @@ graph TB
 
   config --> parser
   parser --> scheduler
+  triggerer --> scheduler
   scheduler --> executor
   executor --> validator
   validator --> notifier
 
   parser --> event_log
+  triggerer --> event_log
   scheduler --> event_log
   executor --> event_log
   validator --> event_log

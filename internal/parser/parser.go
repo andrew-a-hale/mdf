@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -85,6 +86,9 @@ func ParseConfigDirectory(dirPath string) (*Configs, error) {
 	// Track the number of files processed
 	filesProcessed := 0
 
+	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		return nil
+	})
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config directory: %w", err)

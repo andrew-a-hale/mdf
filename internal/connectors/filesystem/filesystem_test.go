@@ -75,11 +75,6 @@ func TestNew(t *testing.T) {
 					t.Errorf("Partition = %v, want %v", fc.Partition, tt.partition)
 				}
 
-				// Check that ProcessedFiles map is initialized
-				if fc.ProcessedFiles == nil {
-					t.Error("ProcessedFiles map should be initialized")
-				}
-
 				// Check that db is initialized
 				if fc.db == nil {
 					t.Error("DuckDB connection should be initialized")
@@ -276,7 +271,7 @@ func TestRead(t *testing.T) {
 			basePath:      subDir,
 			partition:     "daily",
 			expectError:   false,
-			expectedItems: 4, // 2 from CSV + 2 from JSON
+			expectedItems: 0,
 			writeFunc:     func(string) {},
 		},
 	}

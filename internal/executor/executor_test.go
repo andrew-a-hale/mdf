@@ -40,11 +40,6 @@ func (m *MockConnector) Write(data []map[string]any) error {
 	return nil
 }
 
-// Write implements the Connector interface
-func (m *MockConnector) GetPartition() string {
-	return "daily"
-}
-
 func TestNew(t *testing.T) {
 	// Create test data source
 	ds := parser.DataSource{

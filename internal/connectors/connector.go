@@ -12,6 +12,6 @@ type Connector interface {
 	// Write writes data to a resource
 	Write([]map[string]any) error
 
-	// GetPartition get the partition type of the connector
-	GetPartition() string
+	// Close closes the connector
+	Close() error
 }

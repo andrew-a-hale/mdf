@@ -1,5 +1,6 @@
 # Ignore raw and ingested data directories
 raw/
+raw_bak/
 ingested/
 
 # Go specific ignores

@@ -3,6 +3,7 @@ package filesystem
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -55,17 +56,11 @@ func New(basePath string, partition string, fields []parser.FieldConfig) (*Files
 
 	slog.Info("Initialized filesystem connector", "basePath", basePath, "partition", partition)
 	return &FilesystemConnector{
-		BasePath:       basePath,
-		Partition:      partition,
-		db:             db,
-		ProcessedFiles: make(map[string]bool),
-		Fields:         fields,
+		BasePath:  basePath,
+		Partition: partition,
+		db:        db,
+		Fields:    fields,
 	}, nil
-}
-
-// GetPartition returns the partition type
-func (fc *FilesystemConnector) GetPartition() string {
-	return fc.Partition
 }
 
 // Close closes the database connection
@@ -99,17 +94,20 @@ func (fc *FilesystemConnector) Read() ([]map[string]any, error) {
 // readFromDirectory reads all files from a directory and combines the results using DuckDB
 func (fc *FilesystemConnector) readFromDirectory() ([]map[string]any, error) {
 	var allFiles []string
-	err := filepath.Walk(fc.BasePath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(fc.BasePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
-			// TODO: Check if the file has already been processed
-			ext := filepath.Ext(path)
-			if isSupportedFileType(ext) {
-				allFiles = append(allFiles, path)
-			}
+
+		if d.IsDir() {
+			return nil
 		}
+
+		ext := filepath.Ext(path)
+		if isSupportedFileType(ext) {
+			allFiles = append(allFiles, path)
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -128,9 +126,9 @@ func (fc *FilesystemConnector) readFromDirectory() ([]map[string]any, error) {
 		return nil, err
 	}
 
-	// Mark files as processed
+	// Remove processed files
 	for _, filePath := range allFiles {
-		fc.ProcessedFiles[filePath] = true
+		os.Remove(filePath)
 	}
 
 	slog.Info("Read from directory", "dir", fc.BasePath, "files", len(allFiles), "records", len(result))
