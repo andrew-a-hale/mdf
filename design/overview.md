@@ -34,6 +34,8 @@ becomes worthwhile as more integration is required.
 ```YAML
 # Example configuration file
 
+id: example
+
 # Connectors
 connectors:
   source: 

@@ -22,6 +22,7 @@ func TestParseConfigFile(t *testing.T) {
 
 	// Write test configuration
 	testConfig := `
+id: config1
 connectors:
   source: 
     type: filesystem
@@ -115,6 +116,7 @@ func TestParseConfigDirectory(t *testing.T) {
 
 	// Create first config file
 	config1 := `
+id: config1
 connectors:
   source: 
     type: filesystem
@@ -155,6 +157,7 @@ data_sources:
 
 	// Create second config file
 	config2 := `
+id: config2
 connectors:
   source: 
     type: filesystem
@@ -190,7 +193,9 @@ data_sources:
     - label: price
       data_type: float
 `
-	config2Path := filepath.Join(tempDir, "config2.yaml")
+
+	config2Path := filepath.Join(tempDir, "nested", "config2.yaml")
+	os.Mkdir(filepath.Join(tempDir, "nested"), 0755)
 	if err := os.WriteFile(config2Path, []byte(config2), 0644); err != nil {
 		t.Fatalf("Failed to write config2: %v", err)
 	}
@@ -201,9 +206,20 @@ data_sources:
 		t.Fatalf("ParseConfigDirectory() error = %v", err)
 	}
 
-	// Verify combined config
+	// Verify configs parsed
 	if len(*configs) != 2 {
 		t.Errorf("Expected 2 configs, got %d", len(*configs))
+	}
+
+	config3Path := filepath.Join(tempDir, "nested", "config3.yaml")
+	if err := os.WriteFile(config3Path, []byte(config2), 0644); err != nil {
+		t.Fatalf("Failed to write config3: %v", err)
+	}
+
+	// Test duplicate config error
+	_, err = ParseConfigDirectory(tempDir)
+	if err == nil {
+		t.Error("ParseConfigDirectory() with duplicate config ids")
 	}
 
 	// Test with non-existent directory

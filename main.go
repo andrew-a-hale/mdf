@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrew-a-hale/mdf/internal/parser"
 	"github.com/andrew-a-hale/mdf/internal/scheduler"
+	"github.com/andrew-a-hale/mdf/internal/triggerer"
 )
 
 func main() {
@@ -33,8 +34,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize and start the scheduler
-	scheduler := scheduler.New(config)
+	// Initialize and start the Triggerer
+	triggerer := triggerer.New(config)
+	err = triggerer.Start()
+	if err != nil {
+		slog.Error("Failed to start triggerer", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Triggerer is running in background...")
+
+	// Initialize and start the Scheduler
+	scheduler := scheduler.New()
 	err = scheduler.Start()
 	if err != nil {
 		slog.Error("Failed to start scheduler", "error", err)
@@ -56,11 +67,12 @@ func main() {
 		select {
 		case sig := <-sigCh:
 			slog.Info("Received signal, shutting down", "signal", sig.String())
-			scheduler.Stop()
-			slog.Info("Scheduler stopped, exiting")
+			triggerer.Stop()
+			// scheduler.Stop()
+			slog.Info("Triggerer stopped, exiting")
 			return
 		case <-keepaliveTicker.C:
-			slog.Info("Scheduler is still running")
+			slog.Info("Triggerer is still running")
 		}
 	}
 }

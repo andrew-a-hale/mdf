@@ -1,5 +1,7 @@
 # Example configuration file for a job that runs every minute
 
+id: minute-example
+
 # Connectors
 connectors:
   source: 

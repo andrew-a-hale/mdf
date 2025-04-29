@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,7 @@ import (
 type (
 	Configs []Config
 	Config  struct {
+		Id         string         `yaml:"id"`
 		Connectors map[string]any `yaml:"connectors"`
 		DataSource DataSource     `yaml:"data_source"`
 	}
@@ -87,37 +89,40 @@ func ParseConfigDirectory(dirPath string) (*Configs, error) {
 	// Track the number of files processed
 	filesProcessed := 0
 
-	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
-		return nil
-	})
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config directory: %w", err)
-	}
-
-	// Process each YAML file in the directory
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue // Skip subdirectories
+	var seen []string
+	err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
 
-		filename := entry.Name()
-		ext := filepath.Ext(filename)
+		if d.IsDir() {
+			return nil
+		}
+
+		ext := filepath.Ext(d.Name())
 		if ext != ".yaml" && ext != ".yml" {
-			continue // Skip non-YAML files
+			return nil
 		}
 
-		filePath := filepath.Join(dirPath, filename)
-		slog.Info("Processing config file", "file", filePath)
+		slog.Info("Processing config file", "file", path)
 
 		// Parse the individual config file
-		config, err := ParseConfigFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse config file %s: %w", filePath, err)
+		config, parseErr := ParseConfigFile(path)
+		if parseErr != nil {
+			return fmt.Errorf("failed to parse config file %s: %w", path, parseErr)
 		}
+
+		if slices.Contains(seen, config.Id) {
+			return fmt.Errorf("failed to parse config file %s: config with same id already exists", path)
+		}
+		seen = append(seen, config.Id)
 
 		configs = append(configs, *config)
 		filesProcessed++
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	if filesProcessed == 0 {
@@ -133,4 +138,9 @@ func ParseConfigDirectory(dirPath string) (*Configs, error) {
 	)
 
 	return &configs, nil
+}
+
+// ParseConfigRemoteDirectory parse configs from blob storage
+func ParseConfigRemoteDirectory(dirPath string) (*Configs, error) {
+	return &Configs{}, nil
 }

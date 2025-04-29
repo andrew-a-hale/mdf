@@ -1,2 +1,9 @@
-// TODO: create events for the queue for the scheduler to read
 package triggerer
+
+type Triggerer interface {
+	Start() error
+	Stop() error
+	Post(configId string) error
+	RegisterQueue(config map[string]string) error
+	DeregisterQueue(queueId string) error
+}

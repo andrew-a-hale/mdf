@@ -10,12 +10,6 @@ YAML configuration files.
 - Scheduled execution with cron expressions
 - Data validation (not null, unique constraints)
 
-## Roadmap
-
-- Add Notifications for Slack, Email, and Teams
-- Add Event Triggered Ingestions
-- Add Event Log for persistence
-
 ## Project Structure
 
 ```text
